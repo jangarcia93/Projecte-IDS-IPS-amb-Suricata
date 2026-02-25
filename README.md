@@ -122,6 +122,40 @@ Fitxer `/etc/elasticsearch/jvm.options.d/heap.options`:
 
 ---
 
+### Configuració inicial de seguretat (IMPORTANT)
+
+Després d’instal·lar Elasticsearch per primera vegada, és necessari generar o reiniciar la contrasenya de l’usuari `elastic`.
+
+Executar:
+
+```bash
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
+```
+
+El sistema generarà una nova contrasenya que s’haurà d’utilitzar a:
+
+- `/etc/kibana/kibana.yml`
+- `/etc/filebeat/filebeat.yml`
+
+Exemple de configuració a Kibana:
+
+```bash
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "<PASSWORD_GENERADA>"
+```
+
+Exemple a Filebeat:
+
+```bash
+output.elasticsearch:
+  hosts: ["https://localhost:9200"]
+  username: "elastic"
+  password: "<PASSWORD_GENERADA>"
+  ssl.verification_mode: none
+```
+
+---
+
 ## Configuració Kibana
 
 Fitxer `/etc/kibana/kibana.yml`:
