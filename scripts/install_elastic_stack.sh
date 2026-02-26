@@ -29,7 +29,13 @@ sudo systemctl start elasticsearch
 echo "Installing Kibana..."
 sudo apt install kibana -y
 
-sudo sed -i 's/#server.host:.*/server.host: "0.0.0.0"/' /etc/kibana/kibana.yml
+echo "Configuring Kibana..."
+echo "" | sudo tee -a /etc/kibana/kibana.yml
+echo "# Custom lab configuration" | sudo tee -a /etc/kibana/kibana.yml
+echo "server.port: 5601" | sudo tee -a /etc/kibana/kibana.yml
+echo 'server.host: "0.0.0.0"' | sudo tee -a /etc/kibana/kibana.yml
+echo 'elasticsearch.hosts: ["https://localhost:9200"]' | sudo tee -a /etc/kibana/kibana.yml
+echo "elasticsearch.ssl.verificationMode: none" | sudo tee -a /etc/kibana/kibana.yml
 
 sudo systemctl enable kibana
 sudo systemctl start kibana
@@ -44,3 +50,12 @@ sudo systemctl enable filebeat
 sudo systemctl start filebeat
 
 echo "Elastic Stack installation completed."
+echo ""
+echo "IMPORTANT:"
+echo "Run the following commands to generate passwords:"
+echo "sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic"
+echo "sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system"
+echo ""
+echo "Then update:"
+echo "/etc/kibana/kibana.yml"
+echo "/etc/filebeat/filebeat.yml"
