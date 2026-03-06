@@ -1,276 +1,343 @@
-# Projecte IDS/IPS amb Suricata + Elastic Stack
+# Projecte Infraestructura Automatitzada + IDS/IPS amb Suricata
 
 ## Descripció del Projecte
 
-Aquest projecte consisteix en la implementació d’un sistema de detecció d’intrusions (IDS) utilitzant Suricata, integrat amb Elastic Stack (Elasticsearch + Kibana + Filebeat) per a la visualització i anàlisi d’esdeveniments de seguretat en temps real.
+Aquest projecte combina dues parts principals d’una infraestructura de sistemes:
 
-L’objectiu és simular un entorn real on es detectin atacs de xarxa, s’analitzin els logs generats i es visualitzin mitjançant un sistema SIEM.
+1. **Automatització d’infraestructura amb Ansible**
+2. **Monitorització de seguretat amb un sistema IDS/IPS (Suricata)**
 
----
+L’objectiu és construir un laboratori complet que permeti:
 
-## Objectius
+- desplegar serveis de forma automatitzada
+- gestionar múltiples nodes de forma centralitzada
+- monitoritzar el trànsit de xarxa
+- detectar possibles atacs
 
-- Implementar un IDS funcional amb Suricata
-- Definir regles personalitzades de detecció
-- Simular atacs reals (Nmap)
-- Integrar els logs amb Elasticsearch
-- Visualitzar alertes amb Kibana
-- Analitzar esdeveniments de seguretat en temps real
-
----
-
-## Arquitectura del Laboratori
-
-### Màquines virtuals
-
-| Sistema         | Funció                                | IP               |
-|----------------|----------------------------------------|------------------|
-| Kali Linux     | Atacant                               | 192.168.100.20   |
-| Ubuntu Server  | IDS (Suricata + Elastic Stack)        | 192.168.100.10   |
-
-### Xarxa
-
-- Xarxa interna VirtualBox
-- Rang: 192.168.100.0/24
+La infraestructura combina **Docker, Ansible, Suricata i Elastic Stack** per simular un entorn similar al d’una infraestructura real.
 
 ---
 
-## Instal·lació de Suricata
+# Objectius del Projecte
 
-### Instal·lació
+## Automatització (Ansible)
+
+- Implementar un **node de control Ansible**
+- Gestionar múltiples **nodes gestionats**
+- Automatitzar instal·lació de serveis
+- Desplegar configuracions mitjançant playbooks
+- Gestionar infraestructura de forma declarativa
+
+## Seguretat (IDS/IPS)
+
+- Implementar un **IDS funcional amb Suricata**
+- Detectar escaneigs de ports i trànsit sospitós
+- Simular atacs reals amb Kali Linux
+- Analitzar logs de seguretat
+- Visualitzar alertes amb Elastic Stack
+
+---
+
+# Arquitectura del Laboratori
+
+## Components principals
+
+| Sistema | Funció |
+|-------|-------|
+| Kali Linux | Simulació d’atacs |
+| Ubuntu Server | IDS + router de xarxa |
+| Host Docker | Infraestructura Ansible |
+| Ansible Control | Node de control |
+| Managed Node 01 | Node gestionat |
+| Managed Node 02 | Node gestionat |
+
+---
+
+# Arquitectura de Xarxa
+
+La infraestructura està dividida en **dos segments interns** connectats mitjançant el sistema IDS.
+
+- **Segment Kali** → xarxa d’atac
+- **Segment Infraestructura** → servidors gestionats
+
+L’IDS també proporciona **sortida a Internet mitjançant NAT**.
+
+---
+
+## Esquema de Xarxa
+
+```mermaid
+flowchart TB
+
+    subgraph NET1["Segment Kali"]
+        KALI["Kali Linux VM<br/>192.168.100.x<br/>GW: 192.168.100.100"]
+    end
+
+    subgraph EXT["Sortida a Internet"]
+        INTERNET["Internet / Xarxa externa"]
+    end
+
+    subgraph IDSBOX["Ubuntu Server + Suricata"]
+        IDS["IDS Suricata VM<br/>eth0: sortida externa<br/>eth1: 192.168.100.100<br/>eth2: 192.168.200.100"]
+    end
+
+    subgraph NET2["Segment Infraestructura"]
+        HOST["Host Docker / VM Ansible<br/>192.168.200.x<br/>GW: 192.168.200.100"]
+
+        subgraph DOCKER["Infraestructura Docker"]
+            ACTRL["Ansible Control<br/>(Docker)"]
+            MN1["Managed Node 01<br/>(Docker)"]
+            MN2["Managed Node 02<br/>(Docker)"]
+        end
+    end
+
+    KALI -->|Trànsit de prova / Nmap| IDS
+    IDS --> HOST
+    HOST --> ACTRL
+    ACTRL -->|SSH| MN1
+    ACTRL -->|SSH| MN2
+    IDS -->|BRIDGE| INTERNET
+```
+
+---
+
+# Configuració de Routing i NAT
+
+Per permetre la comunicació entre les dues xarxes internes i proporcionar accés a Internet als sistemes del laboratori, el servidor Ubuntu amb Suricata es configura com a **router amb NAT**.
+
+Aquest sistema disposa de tres interfícies:
+
+| Interfície | Xarxa | Funció |
+|-------------|------|--------|
+| enp0s3 | 192.168.100.0/24 | Segment Kali |
+| enp0s8 | 192.168.200.0/24 | Segment infraestructura |
+| enp0s9 | Xarxa externa | Sortida a Internet |
+
+Les dues xarxes internes utilitzen el servidor IDS com a **gateway**:
+
+- Kali → 192.168.100.100
+- Infraestructura → 192.168.200.100
+
+---
+
+# Activació d’IP Forwarding
+
+Per permetre que el sistema actuï com a router es necessita activar el forwarding IP.
+
+Fitxer:
+
+```
+/etc/sysctl.conf
+```
+
+Configuració:
+
+```bash
+net.ipv4.ip_forward=1
+```
+
+Aplicar configuració:
+
+```bash
+sudo sysctl -p
+```
+
+---
+
+# Configuració IPTABLES
+
+## Regla NAT (sortida a Internet)
+
+La següent regla permet que els hosts de les xarxes internes surtin a Internet utilitzant la IP externa del servidor IDS.
+
+```bash
+sudo iptables -t nat -A POSTROUTING -o enp0s9 -j MASQUERADE
+```
+
+La interfície `enp0s9` és la que proporciona la connexió cap a Internet.
+
+---
+
+## Regles de Forwarding
+
+Encara que el forwarding ja està habilitat amb `ip_forward`, es defineixen explícitament les regles per permetre el trànsit entre les xarxes internes i Internet.
+
+Permetre que les xarxes internes surtin a Internet:
+
+```bash
+sudo iptables -A FORWARD -i enp0s3 -o enp0s9 -j ACCEPT
+sudo iptables -A FORWARD -i enp0s8 -o enp0s9 -j ACCEPT
+```
+
+Permetre el retorn de connexions establertes des d’Internet:
+
+```bash
+sudo iptables -A FORWARD -i enp0s9 -o enp0s3 -m state --state RELATED,ESTABLISHED -j ACCEPT
+sudo iptables -A FORWARD -i enp0s9 -o enp0s8 -m state --state RELATED,ESTABLISHED -j ACCEPT
+```
+
+---
+
+# Funcionament
+
+Amb aquesta configuració:
+
+- Kali i la infraestructura poden comunicar-se entre elles
+- Els hosts interns poden accedir a Internet
+- Tot el trànsit passa pel servidor IDS
+- Suricata pot analitzar el trànsit entre segments
+
+Aquest model permet centralitzar la monitorització de xarxa i facilita la detecció d’activitats sospitoses dins del laboratori.
+
+---
+
+# Infraestructura d’Automatització (Ansible)
+
+## Node de Control
+
+El node de control Ansible s’executa dins un **contenidor Docker**.
+
+Funcions:
+
+- executar playbooks
+- gestionar inventari
+- connectar via SSH amb nodes gestionats
+- garantir l’estat desitjat de la infraestructura
+
+---
+
+## Inventari
+
+Fitxer:
+
+```
+inventory/hosts
+```
+
+Exemple:
+
+```bash
+[clients]
+managed-node-01 ansible_host=managed-node-01 ansible_user=ansible ansible_password=ansible ansible_become_password=ansible
+managed-node-02 ansible_host=managed-node-02 ansible_user=ansible ansible_password=ansible ansible_become_password=ansible
+```
+
+---
+
+## Execució del Playbook
+
+```bash
+ansible-playbook -i /inventory/hosts /ansible/setup_web.yml
+```
+
+Aquest playbook automatitza:
+
+- actualització del sistema
+- instal·lació de serveis web
+- configuració del servidor
+
+---
+
+# Sistema IDS amb Suricata
+
+## Instal·lació
 
 ```bash
 sudo apt update
 sudo apt install suricata -y
 ```
 
-### Verificació
+Verificació:
 
 ```bash
 suricata --version
 ```
 
-### Execució manual
+Execució manual:
 
 ```bash
-sudo suricata -c /etc/suricata/suricata.yaml -i enp0s3
+sudo suricata -c /etc/suricata/suricata.yaml -i eth1
 ```
 
 ---
 
-## Configuració de Regles
+# Configuració de Regles
 
-### Instal·lació regles ET Open
+Instal·lació regles ET Open:
 
 ```bash
 sudo suricata-update
 ```
 
-### Regla personalitzada creada
+Regla personalitzada:
 
-Fitxer: `/var/lib/suricata/rules/local.rules`
+Fitxer:
+
+```
+/var/lib/suricata/rules/local.rules
+```
 
 ```bash
 alert tcp any any -> $HOME_NET any (flags:S; msg:"SCAN TCP SYN detectat"; sid:1000001; rev:1;)
 ```
 
-Aquesta regla detecta escaneigs SYN (utilitzats per Nmap).
+---
+
+# Simulació d’Atacs
+
+Escaneig des de Kali:
+
+```bash
+nmap -sS -T4 -p- 192.168.200.x
+```
+
+Aquest trànsit passa per l’IDS i genera alertes.
 
 ---
 
-## Simulació d’Atacs
+# Visualització amb Elastic Stack
 
-### Escaneig complet amb Nmap
-
-```bash
-nmap -sS -T4 -p- 192.168.100.10
-```
-
-Resultat:
-- Generació d’alertes SID 1000001
-- Detectat correctament per Suricata
-
----
-
-## Integració amb Elastic Stack
-
-### Components instal·lats
-
-- Elasticsearch
-- Kibana
-- Filebeat (mòdul Suricata)
-
----
-
-## Configuració Elasticsearch
-
-Configuració bàsica a `/etc/elasticsearch/elasticsearch.yml`:
-
-```bash
-network.host: localhost
-http.port: 9200
-```
-
-Limitació manual de memòria heap:
-
-Fitxer `/etc/elasticsearch/jvm.options.d/heap.options`:
-
-```bash
--Xms512m
--Xmx512m
-```
-
----
-
-### Configuració inicial de seguretat (IMPORTANT)
-
-Després d’instal·lar Elasticsearch per primera vegada, és necessari generar o reiniciar la contrasenya de l’usuari `elastic`.
-
-Executar:
-
-```bash
-sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
-```
-
-El sistema generarà una nova contrasenya que s’haurà d’utilitzar a:
-
-- `/etc/kibana/kibana.yml`
-- `/etc/filebeat/filebeat.yml`
-
-Exemple de configuració a Kibana:
-
-```bash
-elasticsearch.username: "kibana_system"
-elasticsearch.password: "<PASSWORD_GENERADA>"
-```
-
-Exemple a Filebeat:
-
-```bash
-output.elasticsearch:
-  hosts: ["https://localhost:9200"]
-  username: "elastic"
-  password: "<PASSWORD_GENERADA>"
-  ssl.verification_mode: none
-```
-
----
-
-## Configuració Kibana
-
-Fitxer `/etc/kibana/kibana.yml`:
-
-```bash
-server.port: 5601
-server.host: "0.0.0.0"
-
-elasticsearch.hosts: ["https://localhost:9200"]
-elasticsearch.username: "kibana_system"
-elasticsearch.password: "********"
-elasticsearch.ssl.verificationMode: none
-```
-
-Accés via navegador:
-
-```
-http://localhost:5601
-```
-
-Usuari d'accés:
-- elastic
-
----
-
-## Configuració Filebeat
-
-Activació mòdul Suricata:
-
-```bash
-sudo filebeat modules enable suricata
-```
-
-Configuració del mòdul:
-
-Fitxer `/etc/filebeat/modules.d/suricata.yml`:
-
-```bash
-- module: suricata
-  eve:
-    enabled: true
-    var.paths: ["/var/log/suricata/eve.json"]
-```
-
-Sortida cap a Elasticsearch:
-
-Fitxer `/etc/filebeat/filebeat.yml`:
-
-```bash
-output.elasticsearch:
-  hosts: ["https://localhost:9200"]
-  username: "elastic"
-  password: "********"
-  ssl.verification_mode: none
-```
-
----
-
-## Visualització a Kibana
-
-A Discover:
+Logs enviats amb **Filebeat** cap a **Elasticsearch** i visualitzats a **Kibana**.
 
 Filtre per alertes:
 
-```bash
+```
 event.kind: alert
 ```
 
-Filtre per regla personalitzada:
+Filtre per regla:
 
-```bash
+```
 rule.id: 1000001
 ```
 
-Resultat visualitzat:
-- rule.name: SCAN TCP SYN detectat
-- IP atacant
-- Ports escanejats
-- Timestamp dels atacs
+---
+
+# Estat Actual del Projecte
+
+Automatització:
+
+- Ansible control node funcional
+- Inventari configurat
+- Nodes gestionats operatius
+- Playbooks funcionant
+- Infraestructura Docker desplegada
+
+Seguretat:
+
+- IDS Suricata funcional
+- Regles ET Open carregades
+- Regla personalitzada implementada
+- Simulació d’atacs Nmap
+- Logs enviats a Elasticsearch
+- Alertes visualitzades a Kibana
 
 ---
 
-## Estat Actual del Projecte
+# Tecnologies Utilitzades
 
-- IDS funcional amb Suricata  
-- Regles ET Open carregades  
-- Regla personalitzada implementada  
-- Simulació d’atacs Nmap  
-- Logs enviats a Elasticsearch  
-- Visualització en Kibana  
-- Alertes detectades correctament  
-
----
-
-## Properes Millores
-
-- Implementar detecció de força bruta SSH
-- Crear més regles personalitzades
-- Implementar mode IPS (bloqueig)
-- Crear dashboard personalitzat a Kibana
-- Desenvolupar pla de resposta a incidents
-
----
-
-## Conclusions Parcials
-
-El sistema IDS implementat detecta correctament escaneigs de ports mitjançant regles personalitzades.  
-La integració amb Elastic Stack permet una anàlisi visual i estructurada dels esdeveniments de seguretat, aportant una visió clara del comportament de l’atacant.
-
-Aquest entorn simula una arquitectura bàsica de SOC en laboratori.
-
----
-
-## Tecnologies Utilitzades
-
+- Ansible
+- Docker
 - Suricata
 - Elasticsearch
 - Kibana
@@ -281,6 +348,9 @@ Aquest entorn simula una arquitectura bàsica de SOC en laboratori.
 
 ---
 
-## Autor
+# Autor
 
-Projecte desenvolupat com a pràctica d’ASIX2 – Implementació d’un Sistema IDS/IPS.
+Projecte desenvolupat com a pràctica d’**ASIX2** combinant:
+
+- Automatització de configuració amb **Ansible**
+- Implementació d’un sistema **IDS/IPS amb Suricata**
