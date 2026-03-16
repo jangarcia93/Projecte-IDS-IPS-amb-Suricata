@@ -565,7 +565,7 @@ Quan apareix una alerta rellevant, s'envia automàticament un correu electrònic
 
 ## Script d'Alerta
 
-El sistema d'alerta es basa en el següent script:
+El sistema d'alerta es basa en el següent script (Aquesta és la versió final amb el bloqueig d'IP temporal afegit):
 
 ```text
 /usr/local/bin/suricata-alert.sh
@@ -578,8 +578,12 @@ LOG="/var/log/suricata/eve.json"
 EMAIL="admin@example.com"
 STATE_DIR="/var/lib/suricata-alert"
 COOLDOWN=300
+BAN_TIME=600
+BLOCK_LOG="/var/log/suricata-active-response.log"
+CHAIN="SURICATA_BLOCK"
 
 mkdir -p "$STATE_DIR"
+touch "$BLOCK_LOG"
 
 tail -Fn0 "$LOG" | while read -r line; do
 
@@ -612,6 +616,24 @@ tail -Fn0 "$LOG" | while read -r line; do
     ELAPSED=$((NOW - LAST_SENT))
 
     if [ "$ELAPSED" -ge "$COOLDOWN" ]; then
+        ACTION_MSG="Sense resposta automàtica."
+
+        if [ "$SIGNATURE" = "Possible brute force SSH" ]; then
+            if ! iptables -C "$CHAIN" -s "$SRC_IP" -j DROP 2>/dev/null; then
+                iptables -A "$CHAIN" -s "$SRC_IP" -j DROP
+                echo "$(date '+%F %T') - IP $SRC_IP bloquejada temporalment durant $BAN_TIME segons" >> "$BLOCK_LOG"
+                ACTION_MSG="IP atacant bloquejada temporalment durant $BAN_TIME segons."
+
+                (
+                    sleep "$BAN_TIME"
+                    iptables -D "$CHAIN" -s "$SRC_IP" -j DROP 2>/dev/null
+                    echo "$(date '+%F %T') - IP $SRC_IP desbloquejada automàticament" >> "$BLOCK_LOG"
+                ) &
+            else
+                ACTION_MSG="La IP atacant ja estava bloquejada temporalment."
+            fi
+        fi
+
         {
             echo "Alerta IDS detectada"
             echo
@@ -619,6 +641,8 @@ tail -Fn0 "$LOG" | while read -r line; do
             echo "IP origen: $SRC_IP"
             echo "IP destí: $DEST_IP"
             echo "Signatura: $SIGNATURE"
+            echo
+            echo "Acció: $ACTION_MSG"
             echo
             echo "Revisa el dashboard de Kibana per més informació."
         } | mail -s "ALERTA IDS - $SIGNATURE" "$EMAIL"
